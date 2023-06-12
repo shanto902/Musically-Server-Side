@@ -151,10 +151,20 @@ async function run() {
     });
 
     // Class related apis
-    app.get("/classes", async (req, res) => {
-      const result = await classCollection.find().toArray();
+    app.get("/classes", verifyToken, async (req, res) => {
+      const result = await classCollection
+        .find({ status: "approve" })
+        .toArray();
       res.send(result);
     });
+
+    app.get("/all-classes", verifyToken,verifyAdmin, async (req, res) => {
+      const result = await classCollection
+        .find()
+        .toArray();
+      res.send(result);
+    });
+
 
     app.patch("/classes/:id", verifyToken, async (req, res) => {
       const id = req.params.id;
@@ -173,17 +183,17 @@ async function run() {
       res.send(result);
     });
 
-    app.patch("/classes/instructor/:id", async (req, res) => {
-      const id = req.params.id;
-      const filter = { _id: new ObjectId(id) };
-      const updateDoc = {
-        $set: {
-          status: "approved",
-        },
-      };
-      const result = await classCollection.updateOne(filter, updateDoc);
-      res.send(result);
-    });
+    // app.patch("/classes/instructor/:id", async (req, res) => {
+    //   const id = req.params.id;
+    //   const filter = { _id: new ObjectId(id) };
+    //   const updateDoc = {
+    //     $set: {
+    //       status: "approve",
+    //     },
+    //   };
+    //   const result = await classCollection.updateOne(filter, updateDoc);
+    //   res.send(result);
+    // });
 
     app.get(
       "/classes/instructor/:email",
@@ -192,13 +202,12 @@ async function run() {
       async (req, res) => {
         const email = req.params.email;
 
-       
         if (!email) {
           return res.send([]);
         }
 
         const decodedEmail = req.decoded.email;
-     
+
         if (email !== decodedEmail) {
           return res
             .status(403)
@@ -214,6 +223,18 @@ async function run() {
     app.post("/classes", verifyToken, verifyInstructor, async (req, res) => {
       const newClass = req.body;
       const result = await classCollection.insertOne(newClass);
+      res.send(result);
+    });
+
+    app.patch("/classes/approve/:id", verifyToken, async (req, res) => {
+      const id = req.params.id;
+      const filter = { _id: new ObjectId(id) };
+      const updateDoc = {
+        $set: {
+          status: "approve",
+        },
+      };
+      const result = await classCollection.updateOne(filter, updateDoc);
       res.send(result);
     });
 
