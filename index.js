@@ -49,6 +49,7 @@ async function run() {
 
     const classCollection = client.db("vocal-vista").collection("classes");
     const userCollection = client.db("vocal-vista").collection("users");
+    const selectedClassCollection = client.db("vocal-vista").collection("selectedClass");
 
     app.post("/jwt", (req, res) => {
       const user = req.body;
@@ -87,6 +88,20 @@ async function run() {
     app.get("/users", verifyToken, verifyAdmin, async (req, res) => {
       const result = await userCollection.find().toArray();
       res.send(result);
+    });
+
+    app.get("/user/role/:email", async (req, res) => {
+      const email = req.params.email;
+     console.log(email)
+      if (!email) {
+        return res.send({ role: "student" });
+      }
+    
+      const query = { email: email };
+      const user = await userCollection.findOne(query);
+      const role = user ? user.role : "student";
+      console.log(role)
+      res.send({ role: role });
     });
 
     app.get("/users/admin/:email", verifyToken, async (req, res) => {
@@ -151,7 +166,7 @@ async function run() {
     });
 
     // Class related apis
-    app.get("/classes", verifyToken, async (req, res) => {
+    app.get("/classes", async (req, res) => {
       const result = await classCollection
         .find({ status: "approve" })
         .toArray();
@@ -220,6 +235,13 @@ async function run() {
       }
     );
 
+    app.post('/classes/select', async (req, res )=>{
+      const item = req.body;
+      console.log(item)
+      const result = await selectedClassCollection.insertOne(item);
+      res.send(result);
+    })
+
     app.post("/classes", verifyToken, verifyInstructor, async (req, res) => {
       const newClass = req.body;
       const result = await classCollection.insertOne(newClass);
@@ -237,6 +259,35 @@ async function run() {
       const result = await classCollection.updateOne(filter, updateDoc);
       res.send(result);
     });
+
+    app.patch("/classes/deny/:id", verifyToken, async (req, res) => {
+      const id = req.params.id;
+      const filter = { _id: new ObjectId(id) };
+      const updateDoc = {
+        $set: {
+          status: "deny",
+        },
+      };
+      const result = await classCollection.updateOne(filter, updateDoc);
+      res.send(result);
+    });
+
+    app.patch("/classes/feedback/:id", verifyToken, async (req, res) => {
+      const id = req.params.id;
+      const filter = { _id: new ObjectId(id) };
+      const updateDoc = {
+        $set: {
+          feedback: req.body.feedback,
+        },
+      };
+      const result = await classCollection.updateOne(filter, updateDoc);
+      if (result.modifiedCount === 1) {
+        res.send({ message: "Feedback updated successfully" });
+      } else {
+        res.status(404).send({ error: true, message: "Class not found" });
+      }
+    });
+    
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
