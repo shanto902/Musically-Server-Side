@@ -92,6 +92,17 @@ async function run() {
       res.send(result);
     });
 
+    app.get("/users/instructors", async (req, res) => {
+      try {
+        const instructors = await userCollection.find({ role: "instructor" }).toArray();
+        res.send(instructors);
+      } catch (error) {
+        console.error('Error retrieving instructors:', error);
+        res.status(500).json({ error: 'An error occurred while retrieving instructor data.' });
+      }
+    });
+
+
     app.get("/user/role/:email", async (req, res) => {
       const email = req.params.email;
       console.log(email);
@@ -234,6 +245,16 @@ async function run() {
       } else {
         res.status(403).send("Only students can enroll in classes.");
       }
+    });
+
+    app.get("/classes/selected-class", async (req, res) => {
+      const email = req.query.email;
+      if (!email) {
+        res.send([]);
+      }
+      const query = { email: email };
+      const result = await selectedClassCollection.find(query).toArray();
+      res.send(result);
     });
 
     app.post("/classes", verifyToken, verifyInstructor, async (req, res) => {
