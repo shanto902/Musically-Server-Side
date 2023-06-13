@@ -49,7 +49,9 @@ async function run() {
 
     const classCollection = client.db("vocal-vista").collection("classes");
     const userCollection = client.db("vocal-vista").collection("users");
-    const selectedClassCollection = client.db("vocal-vista").collection("selectedClass");
+    const selectedClassCollection = client
+      .db("vocal-vista")
+      .collection("selectedClass");
 
     app.post("/jwt", (req, res) => {
       const user = req.body;
@@ -92,15 +94,15 @@ async function run() {
 
     app.get("/user/role/:email", async (req, res) => {
       const email = req.params.email;
-     console.log(email)
+      console.log(email);
       if (!email) {
         return res.send({ role: "student" });
       }
-    
+
       const query = { email: email };
       const user = await userCollection.findOne(query);
       const role = user ? user.role : "student";
-      console.log(role)
+      console.log(role);
       res.send({ role: role });
     });
 
@@ -173,13 +175,10 @@ async function run() {
       res.send(result);
     });
 
-    app.get("/all-classes", verifyToken,verifyAdmin, async (req, res) => {
-      const result = await classCollection
-        .find()
-        .toArray();
+    app.get("/all-classes", verifyToken, verifyAdmin, async (req, res) => {
+      const result = await classCollection.find().toArray();
       res.send(result);
     });
-
 
     app.patch("/classes/:id", verifyToken, async (req, res) => {
       const id = req.params.id;
@@ -197,18 +196,6 @@ async function run() {
       const result = await classCollection.updateOne(filter, updateDoc);
       res.send(result);
     });
-
-    // app.patch("/classes/instructor/:id", async (req, res) => {
-    //   const id = req.params.id;
-    //   const filter = { _id: new ObjectId(id) };
-    //   const updateDoc = {
-    //     $set: {
-    //       status: "approve",
-    //     },
-    //   };
-    //   const result = await classCollection.updateOne(filter, updateDoc);
-    //   res.send(result);
-    // });
 
     app.get(
       "/classes/instructor/:email",
@@ -235,12 +222,19 @@ async function run() {
       }
     );
 
-    app.post('/classes/select', async (req, res )=>{
+    app.post("/classes/select", verifyToken, async (req, res) => {
       const item = req.body;
-      console.log(item)
-      const result = await selectedClassCollection.insertOne(item);
-      res.send(result);
-    })
+
+      const user = await userCollection.findOne({ email: item.email });
+
+      if (user && user.role === "student") {
+        const result = await selectedClassCollection.insertOne(item);
+        res.send(result);
+        console.log(result);
+      } else {
+        res.status(403).send("Only students can enroll in classes.");
+      }
+    });
 
     app.post("/classes", verifyToken, verifyInstructor, async (req, res) => {
       const newClass = req.body;
@@ -287,7 +281,6 @@ async function run() {
         res.status(404).send({ error: true, message: "Class not found" });
       }
     });
-    
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
