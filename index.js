@@ -3,6 +3,7 @@ const app = express();
 const cors = require("cors");
 require("dotenv").config();
 const jwt = require("jsonwebtoken");
+const stripe = require("stripe")(process.env.STRIPE_KEY);
 const port = process.env.PORT || 5000;
 
 // Middleware
@@ -52,6 +53,7 @@ async function run() {
     const selectedClassCollection = client
       .db("vocal-vista")
       .collection("selectedClass");
+    const paymentCollection = client.db("vocal-vista").collection("payments");
 
     app.post("/jwt", (req, res) => {
       const user = req.body;
@@ -94,18 +96,22 @@ async function run() {
 
     app.get("/users/instructors", async (req, res) => {
       try {
-        const instructors = await userCollection.find({ role: "instructor" }).toArray();
+        const instructors = await userCollection
+          .find({ role: "instructor" })
+          .toArray();
         res.send(instructors);
       } catch (error) {
-        console.error('Error retrieving instructors:', error);
-        res.status(500).json({ error: 'An error occurred while retrieving instructor data.' });
+        console.error("Error retrieving instructors:", error);
+        res
+          .status(500)
+          .json({
+            error: "An error occurred while retrieving instructor data.",
+          });
       }
     });
 
-
     app.get("/user/role/:email", async (req, res) => {
       const email = req.params.email;
-      console.log(email);
       if (!email) {
         return res.send({ role: "student" });
       }
@@ -113,7 +119,6 @@ async function run() {
       const query = { email: email };
       const user = await userCollection.findOne(query);
       const role = user ? user.role : "student";
-      console.log(role);
       res.send({ role: role });
     });
 
@@ -235,13 +240,20 @@ async function run() {
 
     app.post("/classes/select", verifyToken, async (req, res) => {
       const item = req.body;
-
       const user = await userCollection.findOne({ email: item.email });
-
+    
       if (user && user.role === "student") {
-        const result = await selectedClassCollection.insertOne(item);
-        res.send(result);
-        console.log(result);
+        const existingPurchase = await selectedClassCollection.findOne({
+          email: item.email,
+          classId: item.classId
+        });
+    
+        if (existingPurchase) {
+          res.status(400).send("You have already selected this class.");
+        } else {
+          const result = await selectedClassCollection.insertOne(item);
+          res.send(result);
+        }
       } else {
         res.status(403).send("Only students can enroll in classes.");
       }
@@ -302,6 +314,60 @@ async function run() {
         res.status(404).send({ error: true, message: "Class not found" });
       }
     });
+
+    app.post("/create-payment-intent", verifyToken, async (req, res) => {
+      const { price } = req.body;
+      const amount = parseInt(price * 100);
+      const paymentIntent = await stripe.paymentIntents.create({
+        amount: amount,
+        currency: "usd",
+        payment_method_types: ["card"],
+      });
+
+      res.send({
+        clientSecret: paymentIntent.client_secret,
+      });
+    });
+
+    app.post("/payments", verifyToken, async (req, res) => {
+      const payment = req.body;
+    
+      const insertResult = await paymentCollection.insertOne(payment);
+    
+      const query = {
+        _id: new ObjectId(payment.itemId)
+      };
+    
+      let deleteResult;
+    
+      const selectedClass = await selectedClassCollection.findOne(query);
+      if (selectedClass) {
+        const classId = selectedClass.classId;
+    
+        const updatedClass = await classCollection.findOne({ _id: new ObjectId(classId) });
+        if (updatedClass.availableSeats > 0) {
+          const updateResult = await classCollection.updateOne(
+            { _id: new ObjectId(classId) },
+            {
+              $inc: {
+                availableSeats: -1,
+                enrolled: 1,
+              },
+            }
+          );
+    
+          // Remove item from selectedClassCollection
+          await selectedClassCollection.deleteOne({ _id: selectedClass._id });
+        } else {
+          return res.status(400).send({ error: "Class Seat Full" });
+        }
+      }
+    
+      res.send({ insertResult, deleteResult });
+    });
+    
+
+    
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
