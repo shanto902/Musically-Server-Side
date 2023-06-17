@@ -88,6 +88,23 @@ async function run() {
       next();
     };
 
+
+
+
+    // app.post("/clear-data", async (req, res) => {
+    //   try {
+    //     await classCollection.deleteMany({});
+    //     await userCollection.deleteMany({});
+    //     await selectedClassCollection.deleteMany({});
+    //     await paymentCollection.deleteMany({});
+    
+    //     res.status(200).json({ message: "Data cleared successfully." });
+    //   } catch (error) {
+    //     res.status(500).json({ error: "Failed to clear data." });
+    //   }
+    // });
+    
+
     // User Related APIs
     app.get("/users", verifyToken, verifyAdmin, async (req, res) => {
       const result = await userCollection.find().toArray();
@@ -102,25 +119,36 @@ async function run() {
         res.send(instructors);
       } catch (error) {
         console.error("Error retrieving instructors:", error);
-        res
-          .status(500)
-          .json({
-            error: "An error occurred while retrieving instructor data.",
-          });
+        res.status(500).json({
+          error: "An error occurred while retrieving instructor data.",
+        });
       }
     });
 
     app.get("/user/role/:email", async (req, res) => {
-      const email = req.params.email;
-      if (!email) {
-        return res.send({ role: "student" });
+      try {
+        const email = req.params.email;
+    
+        if (!email) {
+          return res.send({ role: "student" });
+        }
+    
+        const query = { email: email };
+        const user = await userCollection.findOne(query);
+    
+        if (user) {
+          // If user found, return role and purchasedItems
+          res.send({ role: user.role, purchasedItems: user.purchasedItems });
+        } else {
+          // If user not found, assume student role and empty purchasedItems array
+          res.send({ role: "student", purchasedItems: [] });
+        }
+      } catch (error) {
+        console.error("Error retrieving user role:", error);
+        res.status(500).send({ error: "Internal Server Error" });
       }
-
-      const query = { email: email };
-      const user = await userCollection.findOne(query);
-      const role = user ? user.role : "student";
-      res.send({ role: role });
     });
+    
 
     app.get("/users/admin/:email", verifyToken, async (req, res) => {
       const email = req.params.email;
@@ -213,6 +241,45 @@ async function run() {
       res.send(result);
     });
 
+    app.get("/data", verifyToken, async (req, res) => {
+      const { email, id } = req.query;
+
+      const paymentQuery = {
+        itemId: id,
+      };
+
+      const selectedClassQuery = {
+        email: email,
+      };
+
+      try {
+        const paymentData = await paymentCollection
+          .find(paymentQuery)
+          .toArray();
+        const selectedClassData = await selectedClassCollection
+          .find(selectedClassQuery)
+          .toArray();
+
+        const result = selectedClassData.map((selectedClass) => {
+          const matchingPayment = paymentData.find(
+            (payment) => payment.itemId === selectedClass._id.toString()
+          );
+
+          return {
+            selectedClass: selectedClass,
+            payment: matchingPayment,
+          };
+        });
+
+        res.send(result);
+      } catch (error) {
+        console.error("Error retrieving data:", error);
+        res
+          .status(500)
+          .json({ error: "An error occurred while retrieving data." });
+      }
+    });
+
     app.get(
       "/classes/instructor/:email",
       verifyToken,
@@ -241,19 +308,17 @@ async function run() {
     app.post("/classes/select", verifyToken, async (req, res) => {
       const item = req.body;
       const user = await userCollection.findOne({ email: item.email });
-    
+
+
+
       if (user && user.role === "student") {
         const existingPurchase = await selectedClassCollection.findOne({
           email: item.email,
-          classId: item.classId
+          classId: item.classId,
         });
-    
-        if (existingPurchase) {
-          res.status(400).send("You have already selected this class.");
-        } else {
-          const result = await selectedClassCollection.insertOne(item);
-          res.send(result);
-        }
+
+        const result = await selectedClassCollection.insertOne(item);
+        res.send(result);
       } else {
         res.status(403).send("Only students can enroll in classes.");
       }
@@ -331,21 +396,29 @@ async function run() {
 
     app.post("/payments", verifyToken, async (req, res) => {
       const payment = req.body;
-    
+
+  
+
       const insertResult = await paymentCollection.insertOne(payment);
-    
+
       const query = {
-        _id: new ObjectId(payment.itemId)
+        _id: new ObjectId(payment.classId),
       };
-    
-      let deleteResult;
-    
+
+ 
+
+      const mClass = await classCollection.findOne(query);
       const selectedClass = await selectedClassCollection.findOne(query);
-      if (selectedClass) {
-        const classId = selectedClass.classId;
-    
-        const updatedClass = await classCollection.findOne({ _id: new ObjectId(classId) });
-        if (updatedClass.availableSeats > 0) {
+
+      if (mClass) {
+        const classId = mClass._id;
+
+
+        const updatedClass = await classCollection.findOne({
+          _id: new ObjectId(mClass._id),
+        });
+
+        if (updatedClass?.availableSeats > 0) {
           const updateResult = await classCollection.updateOne(
             { _id: new ObjectId(classId) },
             {
@@ -355,19 +428,88 @@ async function run() {
               },
             }
           );
-    
+      
+
+     
+
+          const userDocument = await userCollection.findOne({
+            email: payment.email,
+          });
+
+          if (userDocument) {
+            const updatedUser = await userCollection.updateOne(
+              { email: payment.email },
+              { $push: { purchasedItems: payment.classId } }
+            );
+
+            if (updatedUser.modifiedCount === 1) {
+              console.log("User document updated successfully");
+            } else {
+              console.log("No user document found or updated");
+            }
+          }
           // Remove item from selectedClassCollection
-          await selectedClassCollection.deleteOne({ _id: selectedClass._id });
+          const { deletedCount } = await selectedClassCollection.deleteOne({
+            _id: new ObjectId(payment.selectedClassId),
+          });
+
+          if (deletedCount === 1) {
+            console.log("Document deleted successfully");
+          } else {
+            console.log("No document found or deleted");
+          }
         } else {
           return res.status(400).send({ error: "Class Seat Full" });
         }
       }
-    
-      res.send({ insertResult, deleteResult });
-    });
-    
 
-    
+      res.send({ insertResult });
+    });
+
+    app.get("/enrolled", async (req, res) => {
+      const { email } = req.query;
+  
+      try {
+        const query = {
+          email: email,
+        };
+
+        const enrolledClasses = await paymentCollection.find(query).toArray();
+
+
+
+        const classIds = enrolledClasses.map(
+          (enrolledClass) => new ObjectId(enrolledClass.classId)
+        );
+
+ 
+
+        const enrolledData = await classCollection
+          .find({ _id: { $in: classIds } })
+          .toArray();
+
+
+
+        const countMap = enrolledData.reduce((map, doc) => {
+          const { _id } = doc;
+          map.set(_id, (map.get(_id) || 0) + 1);
+          return map;
+        }, new Map());
+
+        const idsWithCounts = [...countMap.entries()].map(([id, count]) => ({
+          id,
+          count,
+        }));
+
+
+        res.send(enrolledData);
+      } catch (error) {
+        console.error("Error retrieving enrolled classes:", error);
+        res.status(500).json({
+          error: "An error occurred while retrieving enrolled classes.",
+        });
+      }
+    });
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
